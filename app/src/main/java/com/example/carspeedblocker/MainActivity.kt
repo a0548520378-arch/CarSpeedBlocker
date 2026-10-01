@@ -49,6 +49,21 @@ class WazeDetectorService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val packageName = event.packageName?.toString() ?: return
+
+            // רשימת אפליקציות "שקופות" - אם הן קופצות, אנחנו מתעלמים ולא משנים את מצב הנעילה
+            // זה כולל מקלדות נפוצות ואת ממשק המערכת (כמו שינוי ווליום)
+            val ignoredPackages = listOf(
+                "com.android.systemui",                  // תפריטי מערכת ווליום
+                "com.google.android.inputmethod.latin",  // Gboard (מקלדת גוגל)
+                "com.sec.android.inputmethod",           // מקלדת סמסונג
+                "com.touchtype.swiftkey"                 // מקלדת SwiftKey
+            )
+
+            if (ignoredPackages.contains(packageName)) {
+                return // אל תעשה כלום, תשאיר את המצב כמו שהוא היה
+            }
+
+            // אם האפליקציה היא וויז, נאפשר מגע. כל אפליקציה אחרת (יוטיוב וכו') - נחסום.
             AppState.isWazeForeground = (packageName == "com.waze")
         }
     }
@@ -85,16 +100,33 @@ class SpeedBlockerService : Service(), LocationListener {
 
     private fun setupOverlayView() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        
+        // יצירת מסך שקוף לחלוטין שעדיין חוסם מגע
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#E6000000"))
-            addView(TextView(this@SpeedBlockerService).apply {
-                text = "המסך חסום בנסיעה!\nאנא התרכז בכביש."
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL // ממקם את הטקסט למעלה באמצע
+            setBackgroundColor(Color.TRANSPARENT) // *** שינוי קריטי: רקע שקוף לגמרי! ***
+            
+            // תווית קטנה שתופיע למעלה
+            val banner = TextView(this@SpeedBlockerService).apply {
+                text = "המסך חסום בנסיעה"
                 setTextColor(Color.WHITE)
-                textSize = 30f
+                textSize = 14f
+                setPadding(40, 10, 40, 10)
+                // רקע שחור חצי שקוף רק מאחורי הטקסט הקטן למעלה, כדי שיהיה קריא
+                setBackgroundColor(Color.parseColor("#99000000")) 
                 gravity = Gravity.CENTER
-            })
+            }
+            
+            // הגדרות עיצוב לתווית (קצת רווח מלמעלה)
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 30, 0, 0)
+            }
+            
+            addView(banner, params)
         }
         overlayView = layout
     }
@@ -124,7 +156,7 @@ class SpeedBlockerService : Service(), LocationListener {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
-        params.gravity = Gravity.CENTER
+        params.gravity = Gravity.TOP
         try { windowManager.addView(overlayView, params); isOverlayAdded = true } catch (e: Exception) {}
     }
 
