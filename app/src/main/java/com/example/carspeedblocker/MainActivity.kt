@@ -40,7 +40,6 @@ object AppState {
     var isPaused: Boolean = false
 }
 
-// מחלקה שמופעלת אוטומטית כשהטאבלט של הרכב נדלק
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
@@ -259,6 +258,81 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, 
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins(20, 10, 20, 10) }
+            setPadding(0, 20, 0, 20)
+            setOnClickListener { startBlockerService() } 
+        })
+
+        layout.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30) })
+
+        layout.addView(TextView(this).apply { 
+            text = "אפשרויות השהיה זמנית:"
+            textSize = 16f
+            setPadding(0, 0, 0, 15)
+            gravity = Gravity.CENTER
+        })
+
+        val pauseLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        pauseLayout.addView(Button(this).apply {
+            text = "השהה ל-5 דק'"
+            setBackgroundColor(Color.parseColor("#FF9800"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(10, 0, 10, 0) }
+            setOnClickListener { pauseBlocker(5) }
+        })
+
+        pauseLayout.addView(Button(this).apply {
+            text = "השהה ל-15 דק'"
+            setBackgroundColor(Color.parseColor("#FF9800"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(10, 0, 10, 0) }
+            setOnClickListener { pauseBlocker(15) }
+        })
+
+        layout.addView(pauseLayout)
+
+        cancelPauseBtn = Button(this).apply {
+            text = "בטל השהיה עכשיו"
+            setBackgroundColor(Color.parseColor("#F44336"))
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(20, 20, 20, 0) }
+            setOnClickListener { 
+                AppState.isPaused = false
+                visibility = View.GONE
+                Toast.makeText(this@MainActivity, "החסימה חזרה לפעולה", Toast.LENGTH_SHORT).show()
+            }
+        }
+        
+        layout.addView(cancelPauseBtn)
+        
+        scrollView.addView(layout)
+        setContentView(scrollView)
+    }
+
+    private fun startBlockerService() {
+        val intent = Intent(this, SpeedBlockerService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        Toast.makeText(this, "השירות הופעל בהצלחה!", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pauseBlocker(minutes: Int) {
+        AppState.isPaused = true
+        Toast.makeText(this, "החסימה הושהתה ל-$minutes דקות", Toast.LENGTH_LONG).show()
+        
+        cancelPauseBtn.visibility = View.VISIBLE
+
+        handler.postDelayed({
+            AppState.isPaused = false
+            cancelPauseBtn.visibility = View.GONE
+            Toast.makeText(this, "זמן ההשהיה נגמר, החסימה חזרה", Toast.LENGTH_LONG).show()
+        }, minutes * 60 * 1000L)
+    }
+}
+).apply { setMargins(20, 10, 20, 10) }
             setPadding(0, 20, 0, 20)
             setOnClickListener { startBlockerService() } 
         })
