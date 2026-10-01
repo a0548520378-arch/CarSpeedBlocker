@@ -4,6 +4,7 @@ import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,6 +26,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -35,9 +37,21 @@ object AppState {
     var isWazeForeground: Boolean = false
     var currentSpeedKmh: Float = 0f
     const val SPEED_THRESHOLD_KMH = 15.0f
-    
-    // משתנה שמחזיק את מצב ההשהיה
     var isPaused: Boolean = false
+}
+
+// מחלקה שמופעלת אוטומטית כשהטאבלט של הרכב נדלק
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
+            val serviceIntent = Intent(context, SpeedBlockerService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        }
+    }
 }
 
 class WazeDetectorService : AccessibilityService() {
@@ -55,7 +69,6 @@ class WazeDetectorService : AccessibilityService() {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val packageName = event.packageName?.toString() ?: return
 
-            // החרגת מקלדות ומערכת כדי לא להפריע להקלדה
             val ignoredPackages = listOf(
                 "com.android.systemui",                  
                 "com.google.android.inputmethod.latin",  
@@ -63,9 +76,7 @@ class WazeDetectorService : AccessibilityService() {
                 "com.touchtype.swiftkey"                 
             )
 
-            if (ignoredPackages.contains(packageName)) {
-                return 
-            }
+            if (ignoredPackages.contains(packageName)) return 
 
             AppState.isWazeForeground = (packageName == "com.waze")
         }
@@ -87,6 +98,10 @@ class SpeedBlockerService : Service(), LocationListener {
         startLocationTracking()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
     private fun startForegroundServiceWithNotification() {
         val channelId = "SpeedBlockerChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -95,7 +110,7 @@ class SpeedBlockerService : Service(), LocationListener {
         }
         val notification = Notification.Builder(this, channelId)
             .setContentTitle("הגנת נסיעה בטוחה פעילה")
-            .setContentText("עוקב אחר נתוני נסיעה...")
+            .setContentText("המערכת פועלת ברקע ושומרת עליך")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
         startForeground(1, notification)
@@ -103,8 +118,6 @@ class SpeedBlockerService : Service(), LocationListener {
 
     private fun setupOverlayView() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        
-        // מסך שקוף לחלוטין שממוקם למעלה
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL 
@@ -122,9 +135,7 @@ class SpeedBlockerService : Service(), LocationListener {
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 30, 0, 0)
-            }
+            ).apply { setMargins(0, 30, 0, 0) }
             
             addView(banner, params)
         }
@@ -144,7 +155,6 @@ class SpeedBlockerService : Service(), LocationListener {
     }
 
     private fun checkAndToggleOverlay() {
-        // נוסיף תנאי: אם המערכת בהשהיה - אל תחסום
         val shouldBlock = AppState.currentSpeedKmh > AppState.SPEED_THRESHOLD_KMH && !AppState.isWazeForeground && !AppState.isPaused
         
         if (shouldBlock && !isOverlayAdded) addOverlay()
@@ -177,36 +187,54 @@ class SpeedBlockerService : Service(), LocationListener {
 class MainActivity : AppCompatActivity() {
     
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var cancelPauseBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        val scrollView = ScrollView(this).apply {
+            layoutParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.parseColor("#F0F0F0"))
+        }
+
         val layout = LinearLayout(this).apply { 
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(50, 50, 50, 50) 
-            setBackgroundColor(Color.parseColor("#F0F0F0")) // רקע טיפה אפור נעים
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(30, 30, 30, 50) 
         }
         
         layout.addView(TextView(this).apply { 
             text = "נסיעה בטוחה"
-            textSize = 28f
-            setTextColor(Color.parseColor("#1565C0")) // כחול
-            setPadding(0, 0, 0, 10)
+            textSize = 26f
+            setTextColor(Color.parseColor("#1565C0"))
+            setPadding(0, 20, 0, 10)
+            gravity = Gravity.CENTER
         })
 
         layout.addView(TextView(this).apply { 
             text = "הגדרות ראשוניות:"
-            textSize = 18f
-            setPadding(0, 0, 0, 30)
+            textSize = 16f
+            setPadding(0, 0, 0, 15)
+            gravity = Gravity.CENTER
         })
+
+        val btnParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(20, 5, 20, 5) }
 
         layout.addView(Button(this).apply { 
             text = "1. אשר גישה למיקום"
+            layoutParams = btnParams
             setOnClickListener { ActivityCompat.requestPermissions(this@MainActivity, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1001) } 
         })
         
         layout.addView(Button(this).apply { 
             text = "2. אשר הצגה מעל אפליקציות"
+            layoutParams = btnParams
             setOnClickListener { 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) 
                     startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) 
@@ -215,36 +243,35 @@ class MainActivity : AppCompatActivity() {
         })
         
         layout.addView(Button(this).apply { 
-            text = "3. הפעל שירות זיהוי ווייז (נגישות)"
+            text = "3. הפעל שירות זיהוי ווייז"
+            layoutParams = btnParams
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } 
         })
 
-        // שטח הפרדה
-        layout.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40)
-        })
+        layout.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30) })
 
         layout.addView(Button(this).apply { 
-            text = "הפעל חסימת נסיעה"
-            setBackgroundColor(Color.parseColor("#4CAF50")) // ירוק
+            text = "הפעל חסימת נסיעה ידנית"
+            setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
             textSize = 20f
-            setPadding(20, 20, 20, 20)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(20, 10, 20, 10) }
+            setPadding(0, 20, 0, 20)
             setOnClickListener { startBlockerService() } 
         })
 
-        // שטח הפרדה
-        layout.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 60)
-        })
+        layout.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30) })
 
         layout.addView(TextView(this).apply { 
             text = "אפשרויות השהיה זמנית:"
-            textSize = 18f
-            setPadding(0, 0, 0, 20)
+            textSize = 16f
+            setPadding(0, 0, 0, 15)
+            gravity = Gravity.CENTER
         })
 
-        // שורת כפתורי השהיה
         val pauseLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -252,7 +279,7 @@ class MainActivity : AppCompatActivity() {
 
         pauseLayout.addView(Button(this).apply {
             text = "השהה ל-5 דק'"
-            setBackgroundColor(Color.parseColor("#FF9800")) // כתום
+            setBackgroundColor(Color.parseColor("#FF9800"))
             setTextColor(Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(10, 0, 10, 0) }
             setOnClickListener { pauseBlocker(5) }
@@ -263,6 +290,50 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.parseColor("#FF9800"))
             setTextColor(Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(10, 0, 10, 0) }
+            setOnClickListener { pauseBlocker(15) }
+        })
+
+        layout.addView(pauseLayout)
+
+        cancelPauseBtn = Button(this).apply {
+            text = "בטל השהיה עכשיו"
+            setBackgroundColor(Color.parseColor("#F44336"))
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(20, 20, 20, 0) }
+            setOnClickListener { 
+                AppState.isPaused = false
+                visibility = View.GONE
+                Toast.makeText(this@MainActivity, "החסימה חזרה לפעולה", Toast.LENGTH_SHORT).show()
+            }
+        }
+        
+        layout.addView(cancelPauseBtn)
+        
+        scrollView.addView(layout)
+        setContentView(scrollView)
+    }
+
+    private fun startBlockerService() {
+        val intent = Intent(this, SpeedBlockerService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        Toast.makeText(this, "השירות הופעל בהצלחה!", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pauseBlocker(minutes: Int) {
+        AppState.isPaused = true
+        Toast.makeText(this, "החסימה הושהתה ל-$minutes דקות", Toast.LENGTH_LONG).show()
+        
+        cancelPauseBtn.visibility = View.VISIBLE
+
+        handler.postDelayed({
+            AppState.isPaused = false
+            cancelPauseBtn.visibility = View.GONE
+            Toast.makeText(this, "זמן ההשהיה נגמר, החסימה חזרה", Toast.LENGTH_LONG).show()
+        }, minutes * 60 * 1000L)
+    }
+}
+, 10, 0) }
             setOnClickListener { pauseBlocker(15) }
         })
 
